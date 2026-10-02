@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HOTH_BNYAN</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:#050816;color:#fff;font-family:Arial,sans-serif}
+body{overflow:hidden}
+#wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center}
+canvas{display:block;width:min(100vw,900px);height:auto;max-height:100vh;background:#070b16}
+.overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,6,23,.80);z-index:5}
+.panel{text-align:center;background:rgba(15,23,42,.92);border:1px solid rgba(167,139,250,.5);padding:30px 34px;border-radius:24px;max-width:540px;width:calc(100% - 32px);box-shadow:0 0 55px rgba(124,58,237,.3)}
+h1{margin:0 0 10px;font-size:clamp(34px,7vw,64px);letter-spacing:2px;color:#c084fc;text-shadow:0 0 24px #7c3aed}
+.sub{font-size:18px;color:#e2e8f0;margin-bottom:16px}
+p{color:#cbd5e1;line-height:1.8}
+button{border:0;border-radius:999px;padding:14px 28px;font-size:18px;font-weight:700;background:linear-gradient(90deg,#7c3aed,#d946ef);color:#fff;cursor:pointer}
+button:focus{outline:3px solid #fff;outline-offset:3px}
+.hidden{display:none!important}
+.hud{position:absolute;top:14px;left:14px;right:14px;display:flex;justify-content:space-between;gap:10px;z-index:3;pointer-events:none;font-weight:700;text-shadow:0 2px 6px #000}
+.hud span{background:rgba(2,6,23,.7);padding:8px 12px;border-radius:12px}
+.help{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:3;background:rgba(2,6,23,.65);padding:7px 12px;border-radius:10px;font-size:13px;color:#cbd5e1;pointer-events:none;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="game" width="900" height="700" aria-label="HOTH_BNYAN لعبة سيارات ووحوش"></canvas>
+
+<div class="hud">
+<span id="score">Score: 0</span>
+<span id="wave">Wave: 1</span>
+<span id="lives">Lives: ♥♥♥</span>
+</div>
+<div class="help">WASD / الأسهم للحركة • Space إطلاق نار</div>
+
+<div id="start" class="overlay">
+<div class="panel">
+<h1>HOTH_BNYAN</h1>
+<div class="sub">MONSTER ROAD</div>
+<p>سوق السيارة، ناور، واطخ الوحوش قبل ما يوصلوا إلك.</p>
+<button id="startBtn">ابدأ اللعبة</button>
+</div>
+</div>
+
+<div id="over" class="overlay hidden">
+<div class="panel">
+<h1>HOTH_BNYAN</h1>
+<div class="sub">انتهت اللعبة</div>
+<p>النتيجة النهائية: <strong id="finalScore">0</strong></p>
+<button id="restartBtn">ابدأ من جديد</button>
+</div>
+</div>
+</div>
+
+<script>
+(() => {
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const start = document.getElementById('start');
+const over = document.getElementById('over');
+const startBtn = document.getElementById('startBtn');
+const restartBtn = document.getElementById('restartBtn');
+const scoreEl = document.getElementById('score');
+const waveEl = document.getElementById('wave');
+const livesEl = document.getElementById('lives');
+const finalScoreEl = document.getElementById('finalScore');
+
+let running = false;
+let score = 0, wave = 1, lives = 3;
+let roadOffset = 0, spawnTick = 0, shake = 0;
+let bullets = [], monsters = [], particles = [];
+const keys = {};
+const car = { x: 424, y: 575, w: 52, h: 90, speed: 6 };
+
+function reset() {
+score = 0; wave = 1; lives = 3;
+bullets = []; monsters = []; particles = [];
+car.x = canvas.width/2 - car.w/2;
+car.y = canvas.height - 120;
+spawnTick = 10;
+roadOffset = 0;
+shake = 0;
+updateHud();
+}
+
+function startGame() {
+reset();
+start.classList.add('hidden');
+over.classList.add('hidden');
+running = true;
+}
+
+function endGame() {
+running = false;
+finalScoreEl.textContent = score;
+over.classList.remove('hidden');
+}
+
+function updateHud() {
+scoreEl.textContent = 'Score: ' + score;
+waveEl.textContent = 'Wave: ' + wave;
+livesEl.textContent = 'Lives: ' + '♥'.repeat(Math.max(0,lives));
+}
+
+function shoot() {
+if (!running) return;
+bullets.push({ x: car.x + car.w/2 - 3, y: car.y - 16, w: 6, h: 18, vy: -11 });
+}
+
+addEventListener('keydown', e => {
+keys[e.code] = true;
+if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+if (e.code === 'Space' && !e.repeat) shoot();
+});
+addEventListener('keyup', e => { keys[e.code] = false; });
+startBtn.addEventListener('click', startGame);
+restartBtn.addEventListener('click', startGame);
+
+function spawnMonster() {
+const tough = Math.random() < Math.min(.18 + wave * .035, .55);
+const r = tough ? 30 : 22;
+monsters.push({
+x: 160 + Math.random() * (canvas.width - 320),
+y: -60,
+r,
+hp: tough ? 3 : 1,
+maxHp: tough ? 3 : 1,
+speed: 1.7 + Math.random() * 1.5 + wave * .17,
+phase: Math.random() * Math.PI * 2
+});
+}
+
+function explode(x, y, count=20) {
+for (let i=0;i<count;i++) {
+particles.push({
+x, y,
+vx:(Math.random()-.5)*8,
+vy:(Math.random()-.5)*8,
+life:35+Math.random()*25,
+size:2+Math.random()*5
+});
+}
+}
+
+function rectHit(a,b) {
+return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+}
+
+function update() {
+if (!running) return;
+
+if (keys.ArrowLeft || keys.KeyA) car.x -= car.speed;
+if (keys.ArrowRight || keys.KeyD) car.x += car.speed;
+if (keys.ArrowUp || keys.KeyW) car.y -= car.speed;
+if (keys.ArrowDown || keys.KeyS) car.y += car.speed;
+
+const left = canvas.width * .16 + 8;
+const right = canvas.width * .84 - car.w - 8;
+car.x = Math.max(left, Math.min(right, car.x));
+car.y = Math.max(80, Math.min(canvas.height-car.h-15, car.y));
+
+roadOffset = (roadOffset + 8 + wave*.4) % 80;
+
+bullets.forEach(b => b.y += b.vy);
+bullets = bullets.filter(b => b.y > -30);
+
+spawnTick--;
+if (spawnTick <= 0) {
+spawnMonster();
+spawnTick = Math.max(18, 65-wave*4);
+}
+
+monsters.forEach(m => {
+m.y += m.speed;
+m.phase += .05;
+m.x += Math.sin(m.phase) * .7;
+});
+
+for (let i=monsters.length-1;i>=0;i--) {
+const m = monsters[i];
+const mb = {x:m.x-m.r,y:m.y-m.r,w:m.r*2,h:m.r*2};
+for (let j=bullets.length-1;j>=0;j--) {
+if (rectHit(bullets[j], mb)) {
+explode(bullets[j].x, bullets[j].y, 5);
+bullets.splice(j,1);
+m.hp--;
+if (m.hp <= 0) {
+explode(m.x,m.y,26);
+monsters.splice(i,1);
+score += m.maxHp === 3 ? 300 : 100;
+wave = Math.floor(score/1200)+1;
+updateHud();
+}
+break;
+}
+}
+}
+
+for (let i=monsters.length-1;i>=0;i--) {
+const m = monsters[i];
+const mb = {x:m.x-m.r,y:m.y-m.r,w:m.r*2,h:m.r*2};
+if (rectHit(car, mb)) {
+explode(car.x+car.w/2, car.y+car.h/2, 40);
+monsters.splice(i,1);
+lives--;
+shake = 16;
+updateHud();
+if (lives <= 0) endGame();
+} else if (m.y > canvas.height+70) {
+monsters.splice(i,1);
+}
+}
+
+particles.forEach(p => {
+p.x += p.vx; p.y += p.vy;
+p.vx *= .97; p.vy *= .97;
+p.life--;
+});
+particles = particles.filter(p => p.life > 0);
+}
+
+function drawRoad() {
+ctx.fillStyle = '#050816';
+ctx.fillRect(0,0,canvas.width,canvas.height);
+const left = canvas.width*.16;
+const width = canvas.width*.68;
+ctx.fillStyle = '#171b29';
+ctx.fillRect(left,0,width,canvas.height);
+ctx.fillStyle = '#7c3aed';
+ctx.fillRect(left-4,0,4,canvas.height);
+ctx.fillRect(left+width,0,4,canvas.height);
+ctx.fillStyle = 'rgba(255,255,255,.75)';
+for (let y=-80+roadOffset;y<canvas.height;y+=80) {
+ctx.fillRect(canvas.width/2-4,y,8,40);
+}
+}
+
+function drawCar() {
+ctx.save();
+ctx.translate(car.x,car.y);
+ctx.shadowBlur = 22;
+ctx.shadowColor = '#7c3aed';
+ctx.fillStyle = '#7c3aed';
+ctx.fillRect(6,8,car.w-12,car.h-16);
+ctx.fillStyle = '#111827';
+ctx.fillRect(12,18,car.w-24,24);
+ctx.fillStyle = '#38bdf8';
+ctx.fillRect(16,22,car.w-32,16);
+ctx.fillStyle = '#e5e7eb';
+ctx.fillRect(3,18,7,22);
+ctx.fillRect(car.w-10,18,7,22);
+ctx.fillRect(3,car.h-38,7,22);
+ctx.fillRect(car.w-10,car.h-38,7,22);
+ctx.fillStyle = '#facc15';
+ctx.fillRect(10,2,9,7);
+ctx.fillRect(car.w-19,2,9,7);
+ctx.restore();
+}
+
+function drawMonster(m) {
+ctx.save();
+ctx.translate(m.x,m.y);
+ctx.shadowBlur = 18;
+ctx.shadowColor = m.maxHp===3 ? '#ef4444' : '#22c55e';
+ctx.fillStyle = m.maxHp===3 ? '#7f1d1d' : '#14532d';
+ctx.beginPath();
+ctx.arc(0,0,m.r,0,Math.PI*2);
+ctx.fill();
+ctx.fillStyle='#fff';
+ctx.beginPath();
+ctx.arc(-m.r*.35,-5,6,0,Math.PI*2);
+ctx.arc(m.r*.35,-5,6,0,Math.PI*2);
+ctx.fill();
+ctx.fillStyle='#ef4444';
+ctx.beginPath();
+ctx.arc(-m.r*.35,-5,3,0,Math.PI*2);
+ctx.arc(m.r*.35,-5,3,0,Math.PI*2);
+ctx.fill();
+ctx.strokeStyle='#fff';
+ctx.lineWidth=3;
+ctx.beginPath();
+ctx.arc(0,10,m.r*.45,0,Math.PI);
+ctx.stroke();
+if (m.maxHp>1) {
+ctx.fillStyle='#111827';
+ctx.fillRect(-m.r,-m.r-13,m.r*2,6);
+ctx.fillStyle='#ef4444';
+ctx.fillRect(-m.r,-m.r-13,m.r*2*(m.hp/m.maxHp),6);
+}
+ctx.restore();
+}
+
+function drawParticles() {
+particles.forEach(p => {
+ctx.fillStyle = `rgba(250,204,21,${Math.max(0,p.life/60)})`;
+ctx.beginPath();
+ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+ctx.fill();
+});
+}
+
+function draw() {
+ctx.save();
+if (shake>0) {
+ctx.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);
+shake *= .86;
+}
+drawRoad();
+monsters.forEach(drawMonster);
+ctx.shadowBlur=10;
+ctx.shadowColor='#facc15';
+ctx.fillStyle='#facc15';
+bullets.forEach(b => ctx.fillRect(b.x,b.y,b.w,b.h));
+ctx.shadowBlur=0;
+drawParticles();
+drawCar();
+ctx.restore();
+}
+
+function loop() {
+update();
+draw();
+requestAnimationFrame(loop);
+}
+reset();
+loop();
+})();
+</script>
+</body>
+</html>
